@@ -1,0 +1,62 @@
+name: Migrate project to Godot v0.6.0 FIXED
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract Godot project from previous migration file
+        shell: bash
+        run: |
+          awk '
+            BEGIN { p=0 }
+            /H4sIAAAAAAAAA/ { p=1 }
+            /^[[:space:]]*ARCHIVE[[:space:]]*$/ { p=0 }
+            p { print }
+          ' .github/workflows/migrate-godot-v060.yml \
+          | sed 's/^[[:space:]]*//' \
+          > /tmp/godot_payload.b64
+
+          base64 -d /tmp/godot_payload.b64 \
+          > /tmp/godot_payload.tar.gz
+
+          tar -xzf /tmp/godot_payload.tar.gz -C .
+
+          # Nie pozwalamy temu workflow tworzyć innego workflow.
+          # Dodamy build-godot-apk.yml ręcznie po migracji.
+          rm -f .github/workflows/build-godot-apk.yml
+
+      - name: Verify Godot project
+        shell: bash
+        run: |
+          test -f godot/project.godot
+          test -f godot/scenes/main.tscn
+          test -f godot/scripts/game_state.gd
+          test -f godot/scripts/main.gd
+
+          echo "Godot project extracted correctly."
+          find godot -maxdepth 3 -type f | sort
+
+      - name: Commit Godot migration
+        shell: bash
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add godot README_MIGRATION.md
+
+          if git diff --cached --quiet; then
+            echo "Godot project already exists - nothing to commit."
+          else
+            git commit -m "Add Godot v0.6.0 project"
+            git push
+          fi
