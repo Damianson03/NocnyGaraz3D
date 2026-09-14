@@ -1,0 +1,21 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'pl.nocnygaraz.game'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'pl.nocnygaraz.game'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '0.1.0-test'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}
