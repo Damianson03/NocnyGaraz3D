@@ -66,8 +66,9 @@ jobs:
             "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-${GODOT_STATUS}/Godot_v${GODOT_VERSION}-${GODOT_STATUS}_export_templates.tpz" \
             -O /tmp/templates.tpz
 
-          mkdir -p \
-            "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_STATUS}"
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_STATUS}"
+
+          mkdir -p "$TEMPLATE_DIR"
 
           rm -rf /tmp/godot_templates
           mkdir -p /tmp/godot_templates
@@ -76,25 +77,39 @@ jobs:
 
           cp -a \
             /tmp/godot_templates/templates/. \
-            "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_STATUS}/"
+            "$TEMPLATE_DIR/"
+
+          echo "Installed export templates:"
+          ls -la "$TEMPLATE_DIR"
 
       - name: Create Android debug keystore
         shell: bash
         run: |
           mkdir -p "$HOME/.android"
 
-          if [ ! -f "$HOME/.android/debug.keystore" ]; then
-            keytool \
-              -genkeypair \
-              -keystore "$HOME/.android/debug.keystore" \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
+          rm -f "$HOME/.android/debug.keystore"
+
+          keytool \
+            -genkeypair \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+          test -f "$HOME/.android/debug.keystore"
+
+          echo "Debug keystore created:"
+          ls -lh "$HOME/.android/debug.keystore"
+
+          keytool \
+            -list \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey
 
       - name: Configure Godot Android paths
         shell: bash
@@ -110,22 +125,31 @@ jobs:
           export/android/java_sdk_path = "$JAVA_HOME"
           EOF
 
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "JAVA_HOME=$JAVA_HOME"
+
+          test -f "$ANDROID_HOME/platform-tools/adb"
+          test -f "$JAVA_HOME/bin/java"
+
       - name: Fix Android export settings
         shell: bash
         run: |
-          # Gra poziomo
-          sed -i \
-            's|window/handheld/orientation=1|window/handheld/orientation=0|' \
-            godot/project.godot
+          # Ekran poziomy.
+          if grep -q 'window/handheld/orientation=' godot/project.godot; then
+            sed -i \
+              's|window/handheld/orientation=.*|window/handheld/orientation=0|' \
+              godot/project.godot
+          fi
 
-          # Gra widoczna normalnie w launcherze Androida
-          sed -i \
-            's|package/show_as_launcher_app=false|package/show_as_launcher_app=true|' \
-            godot/export_presets.cfg
+          # Aplikacja widoczna w launcherze telefonu.
+          if grep -q 'package/show_as_launcher_app=' godot/export_presets.cfg; then
+            sed -i \
+              's|package/show_as_launcher_app=.*|package/show_as_launcher_app=true|' \
+              godot/export_presets.cfg
+          fi
 
-          # Standardowy eksport Godota bez Gradle Build.
-          # Przy use_gradle_build=false nie wolno ręcznie
-          # nadpisywać Min SDK ani Target SDK.
+          # Korzystamy ze standardowego eksportu Godota,
+          # więc nie nadpisujemy Min SDK i Target SDK.
           sed -i \
             '/gradle_build\/min_sdk=/d' \
             godot/export_presets.cfg
@@ -134,12 +158,11 @@ jobs:
             '/gradle_build\/target_sdk=/d' \
             godot/export_presets.cfg
 
-          echo "===== PROJECT SETTINGS ====="
-          grep "orientation" godot/project.godot || true
+          echo "===== EXPORT PRESET ====="
+          cat godot/export_presets.cfg
 
-          echo "===== ANDROID EXPORT SETTINGS ====="
-          grep "gradle_build" godot/export_presets.cfg || true
-          grep "show_as_launcher_app" godot/export_presets.cfg || true
+          echo "===== PROJECT ORIENTATION ====="
+          grep "orientation" godot/project.godot || true
 
       - name: Verify Godot project
         shell: bash
@@ -152,7 +175,7 @@ jobs:
           test -f godot/scripts/hud.gd
           test -f godot/scripts/world_builder.gd
 
-          echo "Project files found."
+          echo "Godot project files OK."
 
       - name: Import Godot project
         shell: bash
@@ -160,7 +183,7 @@ jobs:
           godot \
             --headless \
             --path godot \
-            --import \
+            --editor \
             --quit \
             --verbose
 
@@ -168,6 +191,15 @@ jobs:
         shell: bash
         run: |
           mkdir -p godot/build
+
+          export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$HOME/.android/debug.keystore"
+          export GODOT_ANDROID_KEYSTORE_DEBUG_USER="androiddebugkey"
+          export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD="android"
+
+          echo "Debug keystore:"
+          echo "$GODOT_ANDROID_KEYSTORE_DEBUG_PATH"
+
+          test -f "$GODOT_ANDROID_KEYSTORE_DEBUG_PATH"
 
           godot \
             --headless \
@@ -177,12 +209,13 @@ jobs:
             "build/NocnyGaraz3D-v0.6.0.apk" \
             --verbose
 
-          test -f \
-            godot/build/NocnyGaraz3D-v0.6.0.apk
+          test -f godot/build/NocnyGaraz3D-v0.6.0.apk
 
-          echo "APK CREATED:"
-          ls -lh \
-            godot/build/NocnyGaraz3D-v0.6.0.apk
+          echo "================================"
+          echo "APK CREATED SUCCESSFULLY"
+          echo "================================"
+
+          ls -lh godot/build/NocnyGaraz3D-v0.6.0.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
