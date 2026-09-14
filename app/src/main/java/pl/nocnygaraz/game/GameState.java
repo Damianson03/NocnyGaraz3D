@@ -8,7 +8,7 @@ import java.util.Random;
 
 public final class GameState {
 
-    public static final String GAME_VERSION = "v0.4.0";
+    public static final String GAME_VERSION = "v0.5.0";
 
     public enum Screen { GARAGE, MODE_SELECT, COUNTDOWN, RACING, RESULT }
     public enum Mode { CAREER, CASH_RUN }
