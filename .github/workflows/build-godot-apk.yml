@@ -39,9 +39,7 @@ jobs:
             "platform-tools" \
             "build-tools;35.0.1" \
             "platforms;android-35" \
-            "cmdline-tools;latest" \
-            "cmake;3.10.2.4988404" \
-            "ndk;28.1.13356709"
+            "cmdline-tools;latest"
 
       - name: Download Godot
         shell: bash
@@ -103,7 +101,7 @@ jobs:
         run: |
           mkdir -p "$HOME/.config/godot"
 
-          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+          cat > "$HOME/.config/godot/editor_settings-4.6.tres" <<EOF
           [gd_resource type="EditorSettings" format=3]
 
           [resource]
@@ -112,21 +110,35 @@ jobs:
           export/android/java_sdk_path = "$JAVA_HOME"
           EOF
 
-      - name: Fix Android game settings
+      - name: Fix Android export settings
         shell: bash
         run: |
-          # 0 = landscape
+          # Gra poziomo
           sed -i \
             's|window/handheld/orientation=1|window/handheld/orientation=0|' \
             godot/project.godot
 
-          # Aplikacja ma być widoczna normalnie w launcherze telefonu.
+          # Gra widoczna normalnie w launcherze Androida
           sed -i \
             's|package/show_as_launcher_app=false|package/show_as_launcher_app=true|' \
             godot/export_presets.cfg
 
-          echo "Godot Android settings:"
+          # Standardowy eksport Godota bez Gradle Build.
+          # Przy use_gradle_build=false nie wolno ręcznie
+          # nadpisywać Min SDK ani Target SDK.
+          sed -i \
+            '/gradle_build\/min_sdk=/d' \
+            godot/export_presets.cfg
+
+          sed -i \
+            '/gradle_build\/target_sdk=/d' \
+            godot/export_presets.cfg
+
+          echo "===== PROJECT SETTINGS ====="
           grep "orientation" godot/project.godot || true
+
+          echo "===== ANDROID EXPORT SETTINGS ====="
+          grep "gradle_build" godot/export_presets.cfg || true
           grep "show_as_launcher_app" godot/export_presets.cfg || true
 
       - name: Verify Godot project
@@ -157,10 +169,6 @@ jobs:
         run: |
           mkdir -p godot/build
 
-          export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$HOME/.android/debug.keystore"
-          export GODOT_ANDROID_KEYSTORE_DEBUG_USER="androiddebugkey"
-          export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD="android"
-
           godot \
             --headless \
             --path godot \
@@ -172,6 +180,7 @@ jobs:
           test -f \
             godot/build/NocnyGaraz3D-v0.6.0.apk
 
+          echo "APK CREATED:"
           ls -lh \
             godot/build/NocnyGaraz3D-v0.6.0.apk
 
