@@ -13,16 +13,24 @@ public final class GameState {
             "SILNIK", "TURBO", "SKRZYNIA", "ECU", "OPONY", "MASA"
     };
 
+    /*
+     * v0.3:
+     * 1. bieg krótki, każdy następny wyraźnie dłuższy.
+     */
     private static final float[] GEAR_RPM_RATE = {
-            2100f, 1500f, 1150f, 900f, 720f, 600f
+            3600f, 1900f, 1250f, 850f, 600f, 460f
+    };
+
+    private static final float[] POST_SHIFT_RPM = {
+            0f, 3600f, 3900f, 4200f, 4450f, 4700f
     };
 
     private static final float[] GEAR_ACCEL_FACTOR = {
-            1.00f, 0.84f, 0.70f, 0.59f, 0.50f, 0.43f
+            1.00f, 0.80f, 0.66f, 0.56f, 0.48f, 0.42f
     };
 
     private static final float[] BASE_GEAR_SPEED_CAP = {
-            72f, 118f, 164f, 210f, 256f, 300f
+            70f, 116f, 162f, 208f, 254f, 300f
     };
 
     private final SharedPreferences prefs;
@@ -68,8 +76,6 @@ public final class GameState {
 
     private float shiftPenalty = 0f;
     private float launchPenalty = 0f;
-
-    private float countdownPulse = 0f;
 
     public GameState(Context context) {
         prefs = context.getSharedPreferences(
@@ -157,9 +163,7 @@ public final class GameState {
 
         money -= cost;
         upgrades[idx]++;
-
         save();
-
         return true;
     }
 
@@ -183,7 +187,6 @@ public final class GameState {
         screen = Screen.COUNTDOWN;
 
         gasHeld = false;
-
         rpm = 950f;
         gear = 1;
 
@@ -195,7 +198,6 @@ public final class GameState {
 
         raceTime = 0f;
         countdown = 3.2f;
-        countdownPulse = 0f;
 
         launchQuality = 0f;
         launchPenalty = 0f;
@@ -215,12 +217,9 @@ public final class GameState {
         float myRating = rating();
 
         if (mode == Mode.CAREER) {
-            opponentRating =
-                    235f + careerStage * 18f;
+            opponentRating = 235f + careerStage * 18f;
         } else {
-            opponentRating =
-                    myRating *
-                    (0.90f + random.nextFloat() * 0.035f);
+            opponentRating = myRating * (0.90f + random.nextFloat() * 0.035f);
         }
     }
 
@@ -241,55 +240,33 @@ public final class GameState {
     }
 
     public float launchGreenLow() {
-        return 4100f - upgrades[4] * 40f;
+        return 4050f - upgrades[4] * 35f;
     }
 
     public float launchGreenHigh() {
-        return 5000f + upgrades[4] * 60f;
+        return 5050f + upgrades[4] * 55f;
     }
 
     public void shift() {
-        if (screen != Screen.RACING) {
-            return;
-        }
-
-        if (playerFinished) {
-            return;
-        }
-
-        if (gear >= 6) {
+        if (screen != Screen.RACING || playerFinished || gear >= 6) {
             return;
         }
 
         float low = greenLow();
         float high = greenHigh();
-
-        float center =
-                (low + high) * 0.5f;
-
-        float width =
-                (high - low) * 0.5f;
-
-        float diff =
-                Math.abs(rpm - center);
+        float center = (low + high) * 0.5f;
+        float width = (high - low) * 0.5f;
+        float diff = Math.abs(rpm - center);
 
         if (diff <= width * 0.35f) {
             shiftMessage = "PERFECT SHIFT";
-
-            shiftPenalty =
-                    Math.max(
-                            0f,
-                            shiftPenalty - 0.04f
-                    );
-
+            shiftPenalty = Math.max(0f, shiftPenalty - 0.04f);
         } else if (diff <= width) {
             shiftMessage = "GOOD SHIFT";
             shiftPenalty += 0.05f;
-
         } else if (rpm < low) {
             shiftMessage = "ZA WCZEŚNIE";
             shiftPenalty += 0.18f;
-
         } else {
             shiftMessage = "ZA PÓŹNO";
             shiftPenalty += 0.22f;
@@ -299,14 +276,13 @@ public final class GameState {
 
         gear++;
 
-        rpm = Math.max(
-                3200f,
-                rpm *
-                (0.62f + upgrades[2] * 0.012f)
-        );
+        /*
+         * Po zmianie biegu obroty trafiają w konkretne miejsce,
+         * zamiast być liczone tylko procentowo.
+         */
+        rpm = POST_SHIFT_RPM[gear - 1] + upgrades[2] * 35f;
 
-        speedKmh *=
-                (0.985f + upgrades[2] * 0.0025f);
+        speedKmh *= 0.988f + upgrades[2] * 0.0015f;
     }
 
     public void update(float dt) {
@@ -318,125 +294,58 @@ public final class GameState {
 
         /*
          * =========================
-         *        START / RPM
+         *         START v0.3
          * =========================
+         *
+         * Trzymasz gaz:
+         * RPM stale i dość szybko rośnie.
+         *
+         * Puszczasz gaz:
+         * RPM powoli opada.
+         *
+         * Nie ma automatycznej sinusoidy ani cofania
+         * wskaźnika przy nadal wciśniętym gazie.
          */
-
         if (screen == Screen.COUNTDOWN) {
-            countdownPulse += dt;
+            float riseRate = 3600f + upgrades[3] * 120f;
+            float fallRate = 1080f + upgrades[3] * 25f;
 
             if (gasHeld) {
-                float center =
-                        (launchGreenLow()
-                        + launchGreenHigh())
-                        * 0.5f;
-
-                /*
-                 * Bardzo wolna fala zamiast
-                 * starego agresywnego skakania RPM.
-                 */
-                float wave =
-                        (float)Math.sin(
-                                countdownPulse * 1.65f
-                        ) * 650f;
-
-                float target =
-                        center + 300f + wave;
-
-                /*
-                 * Płynna bezwładność.
-                 */
-                rpm +=
-                        (target - rpm)
-                        * Math.min(
-                                1f,
-                                dt * 2.15f
-                        );
-
+                rpm += riseRate * dt;
             } else {
-                /*
-                 * Po puszczeniu gazu RPM
-                 * również opada płynnie.
-                 */
-                rpm +=
-                        (950f - rpm)
-                        * Math.min(
-                                1f,
-                                dt * 2.05f
-                        );
+                rpm -= fallRate * dt;
             }
 
-            rpm = clamp(
-                    rpm,
-                    900f,
-                    maxRpm() + 120f
-            );
+            rpm = clamp(rpm, 950f, maxRpm() + 140f);
 
             countdown -= dt;
 
             if (countdown <= 0f) {
-                float lo =
-                        launchGreenLow();
+                float lo = launchGreenLow();
+                float hi = launchGreenHigh();
+                float center = (lo + hi) * 0.5f;
+                float half = (hi - lo) * 0.5f;
+                float d = Math.abs(rpm - center);
 
-                float hi =
-                        launchGreenHigh();
+                launchQuality = clamp(
+                        1f - d / (half * 2.0f),
+                        0f,
+                        1f
+                );
 
-                float center =
-                        (lo + hi) * 0.5f;
+                launchPenalty = (1f - launchQuality) * 0.30f;
 
-                float half =
-                        (hi - lo) * 0.5f;
-
-                float d =
-                        Math.abs(rpm - center);
-
-                launchQuality =
-                        clamp(
-                                1f -
-                                d / (half * 2.2f),
-                                0f,
-                                1f
-                        );
-
-                launchPenalty =
-                        (1f - launchQuality)
-                        * 0.30f;
-
-                /*
-                 * Środek zielonego =
-                 * Perfect.
-                 *
-                 * Cała zielona strefa =
-                 * co najmniej Good.
-                 */
-                if (d <= half * 0.36f) {
-
-                    shiftMessage =
-                            "PERFECT START";
-
-                } else if (
-                        rpm >= lo &&
-                        rpm <= hi
-                ) {
-
-                    shiftMessage =
-                            "GOOD START";
-
-                } else if (
-                        launchQuality > 0.45f
-                ) {
-
-                    shiftMessage =
-                            "OK START";
-
+                if (d <= half * 0.35f) {
+                    shiftMessage = "PERFECT START";
+                } else if (rpm >= lo && rpm <= hi) {
+                    shiftMessage = "GOOD START";
+                } else if (launchQuality > 0.45f) {
+                    shiftMessage = "OK START";
                 } else {
-
-                    shiftMessage =
-                            "SŁABY START";
+                    shiftMessage = "SŁABY START";
                 }
 
                 shiftMessageTime = 1.0f;
-
                 screen = Screen.RACING;
             }
 
@@ -449,66 +358,33 @@ public final class GameState {
 
         raceTime += dt;
 
-        /*
-         * =========================
-         *       AUTO GRACZA
-         * =========================
-         */
-
         if (!playerFinished) {
+            float hp = horsepower();
 
-            float hp =
-                    horsepower();
+            float powerScale = 1f + clamp(
+                    (hp - 205f) / 520f,
+                    0f,
+                    1f
+            ) * 0.48f;
 
-            /*
-             * Tuning nadal daje bardzo
-             * wyraźną różnicę, ale MAX
-             * nie potraja już bezpośrednio
-             * całego przyspieszenia.
-             */
-            float powerScale =
-                    1f +
-                    clamp(
-                            (hp - 205f) / 520f,
-                            0f,
-                            1f
-                    ) * 0.48f;
-
-            float weightFactor =
-                    (float)Math.sqrt(
-                            1340f / weightKg()
-                    );
-
-            float grip =
-                    1f +
-                    upgrades[4] * 0.025f;
-
-            float gearbox =
-                    1f +
-                    upgrades[2] * 0.012f;
+            float weightFactor = (float)Math.sqrt(1340f / weightKg());
+            float grip = 1f + upgrades[4] * 0.025f;
+            float gearbox = 1f + upgrades[2] * 0.010f;
 
             float rpmFactor =
-                    0.88f +
-                    0.16f *
-                    Math.min(
-                            1f,
-                            rpm / greenHigh()
-                    );
+                    0.86f
+                    + 0.18f
+                    * Math.min(1f, rpm / greenHigh());
 
             float launchFade =
-                    Math.max(
-                            0f,
-                            1f - raceTime / 2.2f
-                    );
+                    Math.max(0f, 1f - raceTime / 2.2f);
 
-            float penaltyFactor =
-                    Math.max(
-                            0.62f,
-                            1f
-                            - shiftPenalty
-                            - launchPenalty
-                            * launchFade
-                    );
+            float penaltyFactor = Math.max(
+                    0.62f,
+                    1f
+                    - shiftPenalty
+                    - launchPenalty * launchFade
+            );
 
             float accelKmhPerSec =
                     38f
@@ -520,10 +396,6 @@ public final class GameState {
                     * rpmFactor
                     * penaltyFactor;
 
-            /*
-             * Każdy bieg ma swój
-             * naturalny zakres prędkości.
-             */
             float gearSpeedCap =
                     BASE_GEAR_SPEED_CAP[gear - 1]
                     + upgrades[0] * 2.0f
@@ -531,31 +403,20 @@ public final class GameState {
                     + upgrades[3] * 1.0f
                     + upgrades[2] * 1.5f;
 
-            float capPressure =
-                    clamp(
-                            (
-                                gearSpeedCap
-                                + 12f
-                                - speedKmh
-                            ) / 22f,
-                            0.06f,
-                            1f
-                    );
+            float capPressure = clamp(
+                    (gearSpeedCap + 12f - speedKmh) / 22f,
+                    0.06f,
+                    1f
+            );
 
-            /*
-             * Opór powietrza zaczyna być
-             * coraz ważniejszy przy dużej
-             * prędkości.
-             */
-            float aero =
-                    Math.max(
-                            0.35f,
-                            1f -
-                            (float)Math.pow(
-                                    speedKmh / 355f,
-                                    1.6f
-                            ) * 0.68f
-                    );
+            float aero = Math.max(
+                    0.35f,
+                    1f
+                    - (float)Math.pow(
+                            speedKmh / 355f,
+                            1.6f
+                    ) * 0.68f
+            );
 
             speedKmh +=
                     accelKmhPerSec
@@ -563,39 +424,27 @@ public final class GameState {
                     * aero
                     * dt;
 
-            /*
-             * Awaryjne zabezpieczenie.
-             * Nawet maksymalnie ulepszone
-             * auto nie powinno osiągać
-             * 400+ km/h na ćwierć mili.
-             */
-            speedKmh =
-                    Math.min(
-                            speedKmh,
-                            345f
-                    );
+            speedKmh = Math.min(speedKmh, 345f);
 
             /*
              * =========================
-             *     CZASY BIEGÓW 0.2
+             *       BIEGI v0.3
              * =========================
              *
-             * Najważniejsza poprawka.
-             *
-             * Im wyższy bieg,
-             * tym wolniej rośnie RPM.
+             * Każdy kolejny bieg wyraźnie wolniej buduje RPM.
+             * Tuning tylko lekko skraca te czasy.
              */
             float engineRateBonus =
-                    1f +
-                    clamp(
+                    1f
+                    + clamp(
                             (hp - 205f) / 520f,
                             0f,
                             1f
-                    ) * 0.10f;
+                    ) * 0.07f;
 
             float gearboxRateBonus =
-                    1f +
-                    upgrades[2] * 0.008f;
+                    1f
+                    + upgrades[2] * 0.006f;
 
             float rpmRate =
                     GEAR_RPM_RATE[gear - 1]
@@ -604,17 +453,15 @@ public final class GameState {
 
             rpm += rpmRate * dt;
 
-            float limiter =
-                    maxRpm() + 320f;
+            float limiter = maxRpm() + 320f;
 
             if (rpm > limiter) {
-
                 rpm =
                         limiter
-                        - 110f
+                        - 80f
                         + (float)Math.sin(
-                                raceTime * 28f
-                        ) * 70f;
+                                raceTime * 30f
+                        ) * 55f;
 
                 speedKmh *=
                         (1f - 0.10f * dt);
@@ -623,54 +470,34 @@ public final class GameState {
             playerDistance +=
                     (speedKmh / 3.6f) * dt;
 
-            if (
-                    playerDistance >=
-                    402.336f
-            ) {
-
-                playerDistance =
-                        402.336f;
-
-                playerFinished =
-                        true;
-
-                playerFinishTime =
-                        raceTime;
+            if (playerDistance >= 402.336f) {
+                playerDistance = 402.336f;
+                playerFinished = true;
+                playerFinishTime = raceTime;
             }
         }
 
         /*
-         * =========================
-         *           AI
-         * =========================
+         * AI
          */
-
         if (!opponentFinished) {
-
-            float normalized =
-                    clamp(
-                            (
-                                opponentRating
-                                - 245f
-                            ) / 805f,
-                            0f,
-                            1.15f
-                    );
+            float normalized = clamp(
+                    (opponentRating - 245f) / 805f,
+                    0f,
+                    1.15f
+            );
 
             float oppAccel =
-                    28f +
-                    normalized * 34f;
+                    28f + normalized * 34f;
 
-            float oppAero =
-                    Math.max(
-                            0.34f,
-                            1f -
-                            (float)Math.pow(
-                                    opponentSpeedKmh
-                                    / 350f,
-                                    1.55f
-                            ) * 0.66f
-                    );
+            float oppAero = Math.max(
+                    0.34f,
+                    1f
+                    - (float)Math.pow(
+                            opponentSpeedKmh / 350f,
+                            1.55f
+                    ) * 0.66f
+            );
 
             if (raceTime < 0.15f) {
                 oppAccel *= 0.45f;
@@ -691,43 +518,24 @@ public final class GameState {
                     (opponentSpeedKmh / 3.6f)
                     * dt;
 
-            if (
-                    opponentDistance >=
-                    402.336f
-            ) {
-
-                opponentDistance =
-                        402.336f;
-
-                opponentFinished =
-                        true;
-
-                opponentFinishTime =
-                        raceTime;
+            if (opponentDistance >= 402.336f) {
+                opponentDistance = 402.336f;
+                opponentFinished = true;
+                opponentFinishTime = raceTime;
             }
         }
 
-        if (
-                playerFinished &&
+        if (playerFinished && opponentFinished) {
+            finishRace();
+        } else if (
+                playerFinished
+                && raceTime > playerFinishTime + 1.2f
+        ) {
+            finishRace();
+        } else if (
                 opponentFinished
+                && raceTime > opponentFinishTime + 1.2f
         ) {
-
-            finishRace();
-
-        } else if (
-                playerFinished &&
-                raceTime >
-                playerFinishTime + 1.2f
-        ) {
-
-            finishRace();
-
-        } else if (
-                opponentFinished &&
-                raceTime >
-                opponentFinishTime + 1.2f
-        ) {
-
             finishRace();
         }
     }
@@ -738,13 +546,11 @@ public final class GameState {
         }
 
         if (!playerFinished) {
-            playerFinishTime =
-                    raceTime + 9f;
+            playerFinishTime = raceTime + 9f;
         }
 
         if (!opponentFinished) {
-            opponentFinishTime =
-                    raceTime + 9f;
+            opponentFinishTime = raceTime + 9f;
         }
 
         lastWin =
@@ -752,36 +558,25 @@ public final class GameState {
                 <= opponentFinishTime;
 
         if (lastWin) {
-
             wins++;
 
             if (mode == Mode.CAREER) {
-
                 lastReward =
                         150_000L
-                        + careerStage
-                        * 45_000L;
+                        + careerStage * 45_000L;
 
                 careerStage++;
-
             } else {
-
                 lastReward =
                         120_000L
-                        + rating()
-                        * 180L;
+                        + rating() * 180L;
             }
 
             money += lastReward;
-
             save();
-
         } else {
-
             lastReward = 20_000L;
-
             money += lastReward;
-
             save();
         }
 
@@ -811,18 +606,13 @@ public final class GameState {
         long v;
 
         if (m == Mode.CAREER) {
-
             v =
                     150_000L
-                    + careerStage
-                    * 45_000L;
-
+                    + careerStage * 45_000L;
         } else {
-
             v =
                     120_000L
-                    + rating()
-                    * 180L;
+                    + rating() * 180L;
         }
 
         return String.format(
