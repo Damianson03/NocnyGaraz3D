@@ -1,10 +1,13 @@
-name: Build APK FIX
+name: Build NocnyGaraz3D APK
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -14,12 +17,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract game project
+      - name: Move game source into repository
         shell: bash
         run: |
-          awk 'BEGIN{p=0} /^H4sI/{p=1} /^PROJECT_ARCHIVE$/{p=0} p' .github/workflows/build-apk.yml > /tmp/project.b64
-          base64 -d /tmp/project.b64 > /tmp/project.tar.gz
-          tar -xzf /tmp/project.tar.gz -C .
+          if [ ! -f app/src/main/java/pl/nocnygaraz/game/GameState.java ]; then
+            echo "Migrating embedded project..."
+
+            awk 'BEGIN{p=0} /^H4sI/{p=1} /^PROJECT_ARCHIVE$/{p=0} p' \
+              .github/workflows/build-apk.yml > /tmp/project.b64
+
+            base64 -d /tmp/project.b64 > /tmp/project.tar.gz
+            tar -xzf /tmp/project.tar.gz -C .
+
+            rm -f .github/workflows/build-apk.yml
+
+            git config user.name "github-actions"
+            git config user.email "github-actions@github.com"
+
+            git add -A
+            git commit -m "Move game source into repository [skip ci]"
+            git push
+          else
+            echo "Game source already exists - migration skipped."
+          fi
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -49,3 +69,4 @@ jobs:
         with:
           name: NocnyGaraz3D-APK
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
